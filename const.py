@@ -28,6 +28,7 @@ NUMBER_TOKEN = '[number]'
 LABELS_ONLY = False
 PREPROCESS_VOCAB_SIZE_DOC = 20000
 PREPROCESS_VOCAB_SIZE_CODE = 20000
+CUDA_DEVICE_COUNT = 1
 
 MIN_NUM_TOKENS = 5
 MIN_LENGTH_DOCSTRING = 3
@@ -40,8 +41,8 @@ TEACHER_FORCING_RATIO = 0
 LEARNING_RATE = 0.001
 MOMENTUM = 0.9
 EPOCHS = 200
-BATCH_SIZE = 16
-BATCH_SIZE_TEST = 16
+BATCH_SIZE = 64
+BATCH_SIZE_TEST = 64
 TRAINING_PER_BATCH_PRINT = 1000
 ENCODER_LAYERS = 2
 DECODER_LAYERS = 1
@@ -52,10 +53,11 @@ HYPER_PARAMS = {
     'encoder_layers': ENCODER_LAYERS,
     'decoder_layers': DECODER_LAYERS,
     'min_num_tokens': MIN_NUM_TOKENS,
-    'min_length': MIN_LENGTH_DOCSTRING,
-    'max_length': MAX_LENGTH_DOCSTRING,
+    'min_length_docstring': MIN_LENGTH_DOCSTRING,
+    'max_length_docstring': MAX_LENGTH_DOCSTRING,
     'min_length_code': MIN_LENGTH_CODE,
     'max_length_code': MAX_LENGTH_CODE,
+    'cuda_device_count': CUDA_DEVICE_COUNT,
     'hidden_size': HIDDEN_SIZE,
     'learning_rate': LEARNING_RATE,
     'momentum': MOMENTUM,
@@ -64,4 +66,6 @@ HYPER_PARAMS = {
     'batch_size_test': BATCH_SIZE_TEST,
     'lr_step_size': LR_STEP_SIZE,
     'lr_gamma': LR_GAMMA,
+    'input_lang.n_words': -1,
+    'output_lang.n_words': -1,
 }

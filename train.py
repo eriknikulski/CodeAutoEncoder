@@ -49,6 +49,9 @@ def timeSince(since, percent):
     rs = es - s
     return '%s (- %s)' % (asMinutes(s), asMinutes(rs))
 
+# https://pytorch.org/docs/stable/generated/torch.nn.parallel.DistributedDataParallel.html#torch.nn.parallel.DistributedDataParallel
+# das vielleicht nutzen
+
 
 @print_time()
 def train_loop(encoder, decoder, dataloader, loss_fn, encoder_optimizer, decoder_optimizer, experiment, epoch_num):
@@ -203,6 +206,8 @@ def run(args):
     else:
         remove_duplicates = True
 
+    const.CUDA_DEVICE_COUNT = torch.cuda.device_count()
+
     if args.load_data:
         train_file = open(const.TRAIN_DATA_SAVE_PATH, 'rb')
         train_data = pickle.load(train_file)
@@ -235,9 +240,17 @@ def run(args):
     valid_dataloader = loader.DataLoader(valid_data, batch_size=const.BATCH_SIZE_TEST, shuffle=True,
                                          collate_fn=pad_collate.PadCollate())
 
-    encoder = model.EncoderRNN(input_lang.n_words, const.HIDDEN_SIZE, const.BATCH_SIZE, input_lang).to(const.DEVICE)
+    const.HYPER_PARAMS['input_lang.n_words'] = input_lang.n_words
+    const.HYPER_PARAMS['output_lang.n_words'] = output_lang.n_words
+
+    encoder = model.EncoderRNN(input_lang.n_words, const.HIDDEN_SIZE, const.BATCH_SIZE, input_lang)
     decoder = model.DecoderRNN(const.BIDIRECTIONAL * const.ENCODER_LAYERS * const.HIDDEN_SIZE,
-                               output_lang.n_words, const.BATCH_SIZE, output_lang).to(const.DEVICE)
+                               output_lang.n_words, const.BATCH_SIZE, output_lang)
+    if const.CUDA_DEVICE_COUNT > 1:
+        encoder = model.DataParallel(['forward', 'initHidden', 'setBatchSize'], encoder)
+        decoder = model.DataParallel(['forward', 'initHidden', 'setBatchSize'], decoder)
+    encoder.to(const.DEVICE)
+    decoder.to(const.DEVICE)
 
     go_train(encoder, decoder, train_dataloader, test_dataloader)
 
