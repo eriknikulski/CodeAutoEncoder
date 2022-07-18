@@ -235,6 +235,9 @@ def run(args):
     valid_dataloader = loader.DataLoader(valid_data, batch_size=const.BATCH_SIZE_TEST, shuffle=True,
                                          collate_fn=pad_collate.PadCollate())
 
+    const.HYPER_PARAMS['input_lang.n_words'] = input_lang.n_words
+    const.HYPER_PARAMS['output_lang.n_words'] = output_lang.n_words
+
     encoder = model.EncoderRNN(input_lang.n_words, const.HIDDEN_SIZE, const.BATCH_SIZE, input_lang).to(const.DEVICE)
     decoder = model.DecoderRNN(const.BIDIRECTIONAL * const.ENCODER_LAYERS * const.HIDDEN_SIZE,
                                output_lang.n_words, const.BATCH_SIZE, output_lang).to(const.DEVICE)
