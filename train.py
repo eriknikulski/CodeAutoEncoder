@@ -8,9 +8,11 @@ from comet_ml import Experiment
 import torch
 import torch.nn as nn
 from torch import optim
+from torch.nn.parallel import DistributedDataParallel
 
 import const
 import data
+import ddp
 import keys
 import loader
 import model
@@ -154,7 +156,18 @@ def test_loop(encoder, decoder, dataloader, loss_fn, experiment, epoch_num):
 
 
 @print_time('\nTotal ')
-def go_train(encoder, decoder, dataloader, test_dataloader, epochs=const.EPOCHS):
+def go_train(rank, world_size, dataloader, test_dataloader):
+    encoder = model.EncoderRNN(dataloader.input_lang.n_words, const.HIDDEN_SIZE, const.BATCH_SIZE, dataloader.input_lang)
+    decoder = model.DecoderRNN(const.BIDIRECTIONAL * const.ENCODER_LAYERS * const.HIDDEN_SIZE,
+                               dataloader.output_lang.n_words, const.BATCH_SIZE, dataloader.output_lang)
+
+    if torch.cuda.device_count() > 1:
+        ddp.setup(rank, world_size)
+        encoder = DistributedDataParallel(encoder, device_ids=[rank])
+        decoder = DistributedDataParallel(decoder, device_ids=[rank])
+    encoder.to(rank)
+    decoder.to(rank)
+
     losses_train = []
     losses_test = []
     loss_fn = nn.NLLLoss()
@@ -173,7 +186,7 @@ def go_train(encoder, decoder, dataloader, test_dataloader, epochs=const.EPOCHS)
     experiment.log_parameters(const.HYPER_PARAMS)
 
     with experiment.train():
-        for epoch in range(epochs):
+        for epoch in range(const.EPOCHS):
             print(f"Epoch {epoch + 1}\n-------------------------------")
             losses_train.extend(train_loop(encoder, decoder, dataloader, loss_fn, encoder_optimizer, decoder_optimizer,
                                            experiment, epoch))
@@ -187,6 +200,17 @@ def go_train(encoder, decoder, dataloader, test_dataloader, epochs=const.EPOCHS)
 
     print("Done!")
     print(f'LR: {const.LEARNING_RATE}')
+
+    if rank == 0:
+        save(encoder, decoder)
+    ddp.cleanup()
+
+
+def save(encoder, decoder):
+    torch.save(encoder.state_dict(), const.ENCODER_PATH)
+    torch.save(decoder.state_dict(), const.DECODER_PATH)
+
+    print('saved models')
 
 
 def run(args):
@@ -202,6 +226,8 @@ def run(args):
         remove_duplicates = False
     else:
         remove_duplicates = True
+
+    const.CUDA_DEVICE_COUNT = torch.cuda.device_count()
 
     if args.load_data:
         train_file = open(const.TRAIN_DATA_SAVE_PATH, 'rb')
@@ -238,16 +264,8 @@ def run(args):
     const.HYPER_PARAMS['input_lang.n_words'] = input_lang.n_words
     const.HYPER_PARAMS['output_lang.n_words'] = output_lang.n_words
 
-    encoder = model.EncoderRNN(input_lang.n_words, const.HIDDEN_SIZE, const.BATCH_SIZE, input_lang).to(const.DEVICE)
-    decoder = model.DecoderRNN(const.BIDIRECTIONAL * const.ENCODER_LAYERS * const.HIDDEN_SIZE,
-                               output_lang.n_words, const.BATCH_SIZE, output_lang).to(const.DEVICE)
-
-    go_train(encoder, decoder, train_dataloader, test_dataloader)
-
-    torch.save(encoder.state_dict(), const.ENCODER_PATH)
-    torch.save(decoder.state_dict(), const.DECODER_PATH)
-
-    print('saved models')
+    ddp.run(lambda rank, world_size: go_train(rank, world_size, train_dataloader, test_dataloader),
+            const.CUDA_DEVICE_COUNT)
 
 
 if __name__ == '__main__':

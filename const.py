@@ -28,6 +28,7 @@ NUMBER_TOKEN = '[number]'
 LABELS_ONLY = False
 PREPROCESS_VOCAB_SIZE_DOC = 20000
 PREPROCESS_VOCAB_SIZE_CODE = 20000
+CUDA_DEVICE_COUNT = 1
 
 MIN_NUM_TOKENS = 5
 MIN_LENGTH_DOCSTRING = 3
@@ -56,6 +57,7 @@ HYPER_PARAMS = {
     'max_length_docstring': MAX_LENGTH_DOCSTRING,
     'min_length_code': MIN_LENGTH_CODE,
     'max_length_code': MAX_LENGTH_CODE,
+    'cuda_device_count': CUDA_DEVICE_COUNT,
     'hidden_size': HIDDEN_SIZE,
     'learning_rate': LEARNING_RATE,
     'momentum': MOMENTUM,
