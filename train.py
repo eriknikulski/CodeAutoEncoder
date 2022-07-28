@@ -113,7 +113,8 @@ def test_loop(encoder, decoder, dataloader, loss_fn, rank, experiment, epoch_num
     num_batches = len(dataloader)
     test_loss, correct = 0, 0
     current_batch_size = const.BATCH_SIZE_TEST
-    lang = dataloader.dataset.output_lang
+    input_lang = dataloader.dataset.input_lang
+    output_lang = dataloader.dataset.input_lang
 
     inputs = None
 
@@ -152,8 +153,8 @@ def test_loop(encoder, decoder, dataloader, loss_fn, rank, experiment, epoch_num
             results = torch.cat(output).view(1, -1, current_batch_size).T
             correct += (results.to(rank) == targets.to(rank)).all(axis=1).sum().item()
 
-    inputs = [' '.join(lang.seqFromTensor(el.flatten())) for el in inputs[:5]]
-    results = [' '.join(lang.seqFromTensor(el.flatten())) for el in results[:5]]
+    inputs = [' '.join(input_lang.seqFromTensor(el.flatten())) for el in inputs[:5]]
+    results = [' '.join(output_lang.seqFromTensor(el.flatten())) for el in results[:5]]
     experiment.log_text(str(epoch_num) + '\n' +
                         '\n'.join(str(input) + '  ====>  ' + str(result) for input, result in zip(inputs, results)))
 
