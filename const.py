@@ -3,7 +3,6 @@ import torch
 
 MASTER_ADDR = 'localhost'
 MASTER_PORT = '12355'
-WORLD_SIZE = 1
 
 COMET_PROJECT_NAME = 'seq2seqtranslation'
 COMET_WORKSPACE = 'eriknikulski'

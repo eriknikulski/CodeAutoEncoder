@@ -98,12 +98,15 @@ def train_loop(encoder, decoder, dataloader, loss_fn, encoder_optimizer, decoder
         encoder_optimizer.step()
         decoder_optimizer.step()
 
-        experiment.log_metric(f'{rank}_batch_loss', loss.item(),
-                              step=epoch_num * size / dist.get_world_size() / const.BATCH_SIZE + batch)
+        if rank:
+            experiment.log_metric(f'{rank}_batch_loss', loss.item(),
+                                  step=epoch_num * size / dist.get_world_size() / const.BATCH_SIZE + batch)
+        else:
+            experiment.log_metric(f'batch_loss', loss.item(), step=epoch_num * size / const.BATCH_SIZE + batch)
         losses.append(loss.item())
 
         if batch % const.TRAINING_PER_BATCH_PRINT == 0:
-            loss, current = loss.item(), batch * const.BATCH_SIZE
+            loss, current = loss.item(), batch * const.BATCH_SIZE       # TODO: when distr div by world size
             print(f"loss: {loss:>7f}  [{current:>5d}/{size:>5d}]")
     return losses
 
@@ -160,8 +163,12 @@ def test_loop(encoder, decoder, dataloader, loss_fn, rank, experiment, epoch_num
 
     test_loss /= num_batches
     correct /= size
-    experiment.log_metric(f'{rank}_test_batch_loss', test_loss, step=epoch_num)
-    experiment.log_metric(f'{rank}_accuracy', 100*correct, step=epoch_num)
+    if rank:
+        experiment.log_metric(f'{rank}_test_batch_loss', test_loss, step=epoch_num)
+        experiment.log_metric(f'{rank}_accuracy', 100*correct, step=epoch_num)
+    else:
+        experiment.log_metric(f'test_batch_loss', test_loss, step=epoch_num)
+        experiment.log_metric(f'accuracy', 100 * correct, step=epoch_num)
     print(f"Test Error: \n Accuracy: {(100*correct):>0.1f}%, Avg loss: {test_loss:>8f} \n")
     return test_loss
 
@@ -189,25 +196,30 @@ def go_train(rank, world_size, train_data, test_data, experiment_name):
     input_lang = train_data.input_lang
     output_lang = train_data.output_lang
 
-    ddp.setup(rank, world_size)
+    train_sampler = None
+    test_sampler = None
 
     experiment = get_experiment(experiment_name)
     experiment.log_parameters(const.HYPER_PARAMS)
     experiment.log_parameter('world_size', world_size)
 
-    train_sampler = torch.utils.data.distributed.DistributedSampler(train_data)
-    test_sampler = torch.utils.data.distributed.DistributedSampler(test_data)
-    dataloader = loader.DataLoader(train_data, batch_size=const.BATCH_SIZE,
-                                   collate_fn=pad_collate.PadCollate(), sampler=train_sampler)
-    test_dataloader = loader.DataLoader(test_data, batch_size=const.BATCH_SIZE,
-                                        collate_fn=pad_collate.PadCollate(), sampler=test_sampler)
-
     encoder = model.EncoderRNN(input_lang.n_words, const.HIDDEN_SIZE, const.BATCH_SIZE, input_lang)
     decoder = model.DecoderRNN(const.BIDIRECTIONAL * const.ENCODER_LAYERS * const.HIDDEN_SIZE,
                                output_lang.n_words, const.BATCH_SIZE, output_lang)
 
-    encoder = DistributedDataParallel(encoder.to(rank), device_ids=[rank])
-    decoder = DistributedDataParallel(decoder.to(rank), device_ids=[rank])
+    if world_size > 1:
+        ddp.setup(rank, world_size)
+
+        train_sampler = torch.utils.data.distributed.DistributedSampler(train_data)
+        test_sampler = torch.utils.data.distributed.DistributedSampler(test_data)
+
+        encoder = DistributedDataParallel(encoder.to(rank), device_ids=[rank])
+        decoder = DistributedDataParallel(decoder.to(rank), device_ids=[rank])
+
+    dataloader = loader.DataLoader(train_data, batch_size=const.BATCH_SIZE, shuffle=(train_sampler is None),
+                                   collate_fn=pad_collate.PadCollate(), sampler=train_sampler)
+    test_dataloader = loader.DataLoader(test_data, batch_size=const.BATCH_SIZE, shuffle=(train_sampler is None),
+                                        collate_fn=pad_collate.PadCollate(), sampler=test_sampler)
 
     losses_train = []
     losses_test = []
@@ -221,8 +233,9 @@ def go_train(rank, world_size, train_data, test_data, experiment_name):
     with experiment.train():
         for epoch in range(const.EPOCHS):
             print(f"Epoch {epoch + 1}\n-------------------------------")
-            train_sampler.set_epoch(epoch)
-            test_sampler.set_epoch(epoch)
+            if train_sampler and test_sampler:
+                train_sampler.set_epoch(epoch)
+                test_sampler.set_epoch(epoch)
             losses_train.extend(train_loop(encoder, decoder, dataloader, loss_fn, encoder_optimizer, decoder_optimizer,
                                            rank, experiment, epoch))
             with experiment.test():
@@ -230,15 +243,22 @@ def go_train(rank, world_size, train_data, test_data, experiment_name):
             encoder_scheduler.step()
             decoder_scheduler.step()
 
-            experiment.log_metric(f'{rank}_learning_rate_encoder', encoder_optimizer.param_groups[0]['lr'], step=epoch)
-            experiment.log_metric(f'{rank}_learning_rate_decoder', decoder_optimizer.param_groups[0]['lr'], step=epoch)
+            if rank:
+                experiment.log_metric(f'{rank}_learning_rate_encoder', encoder_optimizer.param_groups[0]['lr'],
+                                      step=epoch)
+                experiment.log_metric(f'{rank}_learning_rate_decoder', decoder_optimizer.param_groups[0]['lr'],
+                                      step=epoch)
+            else:
+                experiment.log_metric(f'learning_rate_encoder', encoder_optimizer.param_groups[0]['lr'], step=epoch)
+                experiment.log_metric(f'learning_rate_decoder', decoder_optimizer.param_groups[0]['lr'], step=epoch)
 
     print("Done!")
     print(f'LR: {const.LEARNING_RATE}')
 
-    if rank == 0:
+    if rank is None and rank == 0:
         save(encoder, decoder)
-    ddp.cleanup()
+    if world_size > 1:
+        ddp.cleanup()
     experiment.end()
 
 
@@ -265,7 +285,6 @@ def run(args):
         remove_duplicates = True
 
     const.CUDA_DEVICE_COUNT = torch.cuda.device_count()
-    const.WORLD_SIZE = torch.cuda.device_count()
 
     if args.load_data:
         train_file = open(const.TRAIN_DATA_SAVE_PATH, 'rb')
@@ -297,7 +316,10 @@ def run(args):
 
     experiment_name = ''.join(random.choice(string.ascii_lowercase) for _ in range(10))
     print(f'CUDA_DEVICE_COUNT: {const.CUDA_DEVICE_COUNT}')
-    ddp.run(go_train, const.CUDA_DEVICE_COUNT, train_data, test_data, experiment_name)
+    if const.CUDA_DEVICE_COUNT:
+        ddp.run(go_train, const.CUDA_DEVICE_COUNT, train_data, test_data, experiment_name)
+    else:
+        go_train(None, 1, train_data, test_data, experiment_name)
 
 
 if __name__ == '__main__':
